@@ -1,0 +1,386 @@
+// CodexFuse Prisma schema
+// Provider: Postgres in prod; SQLite supported for local dev (set DATABASE_URL accordingly).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Role {
+  USER
+  ADMIN
+  SUPERADMIN
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+  VIEWER
+}
+
+enum PlanInterval {
+  MONTH
+  YEAR
+  ONE_TIME
+}
+
+enum GenerationKind {
+  CHAT
+  IMAGE
+  IMAGE_EDIT
+  TTS
+  STT
+  CODE
+  TEMPLATE
+  TRANSLATE
+  OCR
+  AI_DETECTOR
+  PLAGIARISM
+  AI_SEARCH
+  RAG
+  AGENT
+  WORKFLOW
+  VIDEO
+  MUSIC
+  CUSTOM_BOT
+  BRAND_VOICE
+}
+
+enum GenerationStatus {
+  QUEUED
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+enum AssetKind {
+  IMAGE
+  AUDIO
+  VIDEO
+  DOCUMENT
+  OTHER
+}
+
+model User {
+  id              String          @id @default(cuid())
+  email           String          @unique
+  passwordHash    String
+  name            String?
+  avatarUrl       String?
+  role            Role            @default(USER)
+  emailVerified   DateTime?
+  emailVerifyToken String?
+  resetToken      String?
+  resetTokenExpiry DateTime?
+  isActive        Boolean         @default(true)
+  credits         Int             @default(10000)
+  planId          String?
+  plan            Plan?           @relation(fields: [planId], references: [id])
+  planRenewsAt    DateTime?
+  createdAt       DateTime        @default(now())
+  updatedAt       DateTime        @updatedAt
+  lastLoginAt     DateTime?
+  refreshTokens   RefreshToken[]
+  memberships     Membership[]
+  ownedWorkspaces Workspace[]     @relation("WorkspaceOwner")
+  generations     Generation[]
+  assets          Asset[]
+  chats           Chat[]
+  documents       Document[]
+  bots            CustomBot[]
+  brandVoices     BrandVoice[]
+  agents          Agent[]
+  workflows       Workflow[]
+  invitations     Invitation[]    @relation("Inviter")
+  auditLogs       AuditLog[]
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String   @unique
+  expiresAt DateTime
+  revoked   Boolean  @default(false)
+  userAgent String?
+  ip        String?
+  createdAt DateTime @default(now())
+}
+
+model Plan {
+  id          String       @id @default(cuid())
+  name        String       @unique
+  description String?
+  priceCents  Int          @default(0)
+  currency    String       @default("USD")
+  interval    PlanInterval @default(MONTH)
+  monthlyCredits Int       @default(0)
+  features    Json         @default("{}")
+  isActive    Boolean      @default(true)
+  sortOrder   Int          @default(0)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  users       User[]
+}
+
+model Workspace {
+  id           String       @id @default(cuid())
+  name         String
+  slug         String       @unique
+  ownerId      String
+  owner        User         @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  logoUrl      String?
+  brandColor   String?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  memberships  Membership[]
+  invitations  Invitation[]
+  brandVoices  BrandVoice[]
+  bots         CustomBot[]
+  agents       Agent[]
+  workflows    Workflow[]
+  documents    Document[]
+}
+
+model Membership {
+  id          String        @id @default(cuid())
+  userId      String
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+
+  @@unique([userId, workspaceId])
+}
+
+model Invitation {
+  id          String        @id @default(cuid())
+  email       String
+  workspaceId String
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role        WorkspaceRole @default(MEMBER)
+  token       String        @unique
+  inviterId   String
+  inviter     User          @relation("Inviter", fields: [inviterId], references: [id])
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  createdAt   DateTime      @default(now())
+}
+
+model PromptTemplate {
+  id          String   @id @default(cuid())
+  slug        String   @unique
+  name        String
+  category    String
+  description String?
+  icon        String?
+  systemPrompt String?  @db.Text
+  promptTemplate String @db.Text
+  fields      Json     @default("[]")
+  defaultModel String?
+  isActive    Boolean  @default(true)
+  isFeatured  Boolean  @default(false)
+  sortOrder   Int      @default(0)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}
+
+model Generation {
+  id          String           @id @default(cuid())
+  userId      String
+  user        User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind        GenerationKind
+  provider    String
+  model       String?
+  status      GenerationStatus @default(SUCCESS)
+  input       Json
+  output      Json?
+  error       String?
+  inputTokens Int              @default(0)
+  outputTokens Int             @default(0)
+  creditsUsed Int              @default(0)
+  durationMs  Int              @default(0)
+  createdAt   DateTime         @default(now())
+  assets      Asset[]
+}
+
+model Asset {
+  id           String     @id @default(cuid())
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  generationId String?
+  generation   Generation? @relation(fields: [generationId], references: [id], onDelete: SetNull)
+  kind         AssetKind
+  url          String
+  mimeType     String?
+  sizeBytes    Int?
+  meta         Json?
+  createdAt    DateTime   @default(now())
+}
+
+model Chat {
+  id        String        @id @default(cuid())
+  userId    String
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String        @default("New chat")
+  model     String?
+  systemPrompt String?    @db.Text
+  botId     String?
+  bot       CustomBot?    @relation(fields: [botId], references: [id], onDelete: SetNull)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  messages  ChatMessage[]
+}
+
+model ChatMessage {
+  id        String   @id @default(cuid())
+  chatId    String
+  chat      Chat     @relation(fields: [chatId], references: [id], onDelete: Cascade)
+  role      String
+  content   String   @db.Text
+  meta      Json?
+  createdAt DateTime @default(now())
+}
+
+model Document {
+  id          String       @id @default(cuid())
+  userId      String
+  user        User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace?   @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  name        String
+  mimeType    String?
+  sizeBytes   Int?
+  url         String?
+  text        String?      @db.Text
+  status      String       @default("ready")
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  chunks      DocumentChunk[]
+}
+
+model DocumentChunk {
+  id         String   @id @default(cuid())
+  documentId String
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  index      Int
+  content    String   @db.Text
+  embedding  Json?
+  createdAt  DateTime @default(now())
+}
+
+model CustomBot {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  avatarUrl   String?
+  systemPrompt String   @db.Text
+  model       String?
+  temperature Float      @default(0.7)
+  isPublic    Boolean    @default(false)
+  tools       Json       @default("[]")
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  chats       Chat[]
+}
+
+model BrandVoice {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  tone        String?
+  styleGuide  String?    @db.Text
+  sample      String?    @db.Text
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+}
+
+model Agent {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  goal        String     @db.Text
+  systemPrompt String?   @db.Text
+  tools       Json       @default("[]")
+  model       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  runs        AgentRun[]
+}
+
+model AgentRun {
+  id        String   @id @default(cuid())
+  agentId   String
+  agent     Agent    @relation(fields: [agentId], references: [id], onDelete: Cascade)
+  input     String   @db.Text
+  status    String   @default("queued")
+  steps     Json     @default("[]")
+  output    String?  @db.Text
+  error     String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Workflow {
+  id          String     @id @default(cuid())
+  userId      String
+  user        User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  workspaceId String?
+  workspace   Workspace? @relation(fields: [workspaceId], references: [id], onDelete: SetNull)
+  name        String
+  description String?
+  nodes       Json       @default("[]")
+  edges       Json       @default("[]")
+  isActive    Boolean    @default(true)
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+  runs        WorkflowRun[]
+}
+
+model WorkflowRun {
+  id         String   @id @default(cuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status     String   @default("queued")
+  input      Json?
+  output     Json?
+  log        Json     @default("[]")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model Setting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action    String
+  target    String?
+  meta      Json?
+  ip        String?
+  userAgent String?
+  createdAt DateTime @default(now())
+}
