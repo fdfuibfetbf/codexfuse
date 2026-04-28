@@ -30,7 +30,13 @@ async function request<T>(method: string, path: string, body?: unknown, init?: R
   });
 
   // try refresh on 401
-  if (res.status === 401 && useAuthStore.getState().refresh && !path.startsWith('/auth/')) {
+  if (
+    res.status === 401 &&
+    useAuthStore.getState().refresh &&
+    !path.startsWith('/auth/refresh') &&
+    !path.startsWith('/auth/login') &&
+    !path.startsWith('/auth/register')
+  ) {
     const ok = await useAuthStore.getState().tryRefresh();
     if (ok) {
       const access2 = useAuthStore.getState().access;

@@ -17,9 +17,11 @@ export function signAccessToken(user: Pick<User, 'id' | 'email' | 'role'>) {
 }
 
 export function signRefreshToken(userId: string) {
-  return jwt.sign({ sub: userId }, env.JWT_REFRESH_SECRET, {
-    expiresIn: env.JWT_REFRESH_EXPIRES_IN
-  } as SignOptions);
+  return jwt.sign(
+    { sub: userId, jti: crypto.randomBytes(16).toString('hex') },
+    env.JWT_REFRESH_SECRET,
+    { expiresIn: env.JWT_REFRESH_EXPIRES_IN } as SignOptions
+  );
 }
 
 export const sha256 = (s: string) => crypto.createHash('sha256').update(s).digest('hex');

@@ -20,6 +20,8 @@ interface AuthState {
   tryRefresh: () => Promise<boolean>;
 }
 
+let refreshInFlight: Promise<boolean> | null = null;
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -29,26 +31,35 @@ export const useAuthStore = create<AuthState>()(
       setAuth: ({ user, access, refresh }) => set({ user, access, refresh }),
       setUser: (user) => set({ user }),
       clear: () => set({ user: null, access: null, refresh: null }),
-      tryRefresh: async () => {
+      tryRefresh: () => {
+        if (refreshInFlight) return refreshInFlight;
         const refresh = get().refresh;
-        if (!refresh) return false;
-        try {
-          const res = await fetch('/api/auth/refresh', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ refresh })
-          });
-          if (!res.ok) {
+        if (!refresh) return Promise.resolve(false);
+        refreshInFlight = (async () => {
+          try {
+            const res = await fetch('/api/auth/refresh', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ refresh })
+            });
+            if (!res.ok) {
+              set({ user: null, access: null, refresh: null });
+              return false;
+            }
+            const data = await res.json();
+            set({ user: data.user, access: data.access, refresh: data.refresh });
+            return true;
+          } catch {
             set({ user: null, access: null, refresh: null });
             return false;
+          } finally {
+            // release after microtask so peers awaiting the same promise still resolve to its value
+            setTimeout(() => {
+              refreshInFlight = null;
+            }, 0);
           }
-          const data = await res.json();
-          set({ user: data.user, access: data.access, refresh: data.refresh });
-          return true;
-        } catch {
-          set({ user: null, access: null, refresh: null });
-          return false;
-        }
+        })();
+        return refreshInFlight;
       }
     }),
     { name: 'codexfuse-auth' }
